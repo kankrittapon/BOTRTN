@@ -1,0 +1,50 @@
+{
+  "targetUrl": "https://www.facebook.com/",
+  "headless": false,
+  "browser": "chrome",
+  "screenshotPath": "artifacts/screenshot.png",
+  "timeout": 30000,
+  "selectedProfile": "Default",
+  "profiles": [
+    {
+      "name": "Default",
+      "userDataDirName": "botRTN_Default",
+      "credentials": {
+        "user": "",
+        "pass": ""
+      },
+      "proxy": {
+        "enabled": false,
+        "server": "",
+        "username": "",
+        "password": ""
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": "Task 1",
+      "profileName": "Default",
+      "enabled": true,
+      "runMode": 0,
+      "delay": null,
+      "runAtTime": null,
+      "repeatDaily": true,
+      "useCredentials": true,
+      "targetUrlOverride": null,
+      "screenshotPathOverride": null
+    }
+  ],
+  "login": {
+    "url": "https://www.facebook.com/login",
+    "userSelector": "input[name='email']",
+    "passSelector": "input[name='pass']",
+    "submitSelector": "button[name='login'], button[type='submit']",
+    "loggedInCheckSelector": "div[role='feed']",
+    "afterLoginWaitSelector": "div[role='feed']",
+    "afterLoginUrl": "https://www.facebook.com/",
+    "twoFactorSelector": "input#approvals_code, input[name='approvals_code'], input[name='otp']",
+    "waitTimeout": 30000
+  }
+}

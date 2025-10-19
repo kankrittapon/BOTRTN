@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Configuration;
 using Microsoft.Playwright;
 
 public class LoginOptions
@@ -22,49 +21,34 @@ public class LoginOptions
 
 public static class Login
 {
-    public static LoginOptions ReadFromConfig(IConfiguration config, string section = "Login")
-    {
-        var s = config.GetSection(section);
-        return new LoginOptions
-        {
-            Url = s["Url"],
-            UserSelector = s["UserSelector"] ?? "#email",
-            PassSelector = s["PassSelector"] ?? "#pass",
-            SubmitSelector = s["SubmitSelector"] ?? "button[type=submit]",
-            LoggedInCheckSelector = s["LoggedInCheckSelector"],
-            AfterLoginWaitSelector = s["AfterLoginWaitSelector"],
-            TwoFactorSelector = s["TwoFactorSelector"],
-            WaitTimeout = int.TryParse(s["WaitTimeout"], out var to) ? to : 30000
-        };
-    }
-
     /// <summary>
     /// ล็อกอินถ้ายังไม่ล็อกอิน (ใช้ Persistent Context จะจำ session ให้เอง)
-    /// ดูด user/pass จาก ENV (APP_USER/APP_PASS) หรือจาก appsettings.Credentials เป็น fallback
+    /// Credentials อ่านจาก UserSettings.json และยังสามารถ override ด้วย ENV ได้ถ้าต้องการ
     /// </summary>
     public static async Task EnsureAsync(
         IBrowserContext context,
-        IConfiguration config,
+        RunnerSettings settings,
+        BrowserProfileSettings profile,
         string userEnv = "APP_USER",
         string passEnv = "APP_PASS",
         LoginOptions? options = null)
     {
-        options ??= ReadFromConfig(config);
+        options ??= FromSettings(settings);
         if (string.IsNullOrWhiteSpace(options.Url))
-            throw new ArgumentException("Login URL is not configured (Login:Url).");
+            throw new ArgumentException("Login URL is not configured.");
 
-        // อ่าน credentials: ENV > appsettings.json
-        var username =
-            Environment.GetEnvironmentVariable(userEnv)
-            ?? config["Credentials:User"];
+        // อ่าน credentials: UserSettings.json > ENV
+        var username = !string.IsNullOrWhiteSpace(profile.Credentials.User)
+            ? profile.Credentials.User!.Trim()
+            : Environment.GetEnvironmentVariable(userEnv);
 
-        var password =
-            Environment.GetEnvironmentVariable(passEnv)
-            ?? config["Credentials:Pass"];
+        var password = !string.IsNullOrWhiteSpace(profile.Credentials.Pass)
+            ? profile.Credentials.Pass!
+            : Environment.GetEnvironmentVariable(passEnv);
 
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-            throw new ArgumentException(
-                $"Credentials missing. Set ENV {userEnv}/{passEnv} or appsettings: Credentials:User/Pass");
+            throw new LoginFailedException(
+                $"Credentials missing. ระบุไว้ในโปรไฟล์ \"{profile.Name}\" หรือกำหนด ENV {userEnv}/{passEnv}.");
 
         var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
 
@@ -166,7 +150,63 @@ public static class Login
             }
         }
 
+        var loginError = await DetectKnownLoginErrorAsync(page);
+        if (!string.IsNullOrWhiteSpace(loginError))
+        {
+            Console.WriteLine($"⚠️ พบข้อความผิดพลาดจากระบบล็อกอิน: {loginError}");
+            throw new LoginFailedException(loginError);
+        }
+
         Console.WriteLine("✅ Login ensure complete.");
+    }
+
+    private static LoginOptions FromSettings(RunnerSettings settings)
+    {
+        var s = settings.Login;
+        return new LoginOptions
+        {
+            Url = s.Url,
+            UserSelector = s.UserSelector,
+            PassSelector = s.PassSelector,
+            SubmitSelector = s.SubmitSelector,
+            LoggedInCheckSelector = s.LoggedInCheckSelector,
+            AfterLoginWaitSelector = s.AfterLoginWaitSelector,
+            TwoFactorSelector = s.TwoFactorSelector,
+            WaitTimeout = s.WaitTimeout
+        };
+    }
+
+    private static async Task<string?> DetectKnownLoginErrorAsync(IPage page)
+    {
+        var knownErrors = new (string Selector, string Message)[]
+        {
+            ("div._9ay7", "The email address you entered isn't connected to an account.")
+        };
+
+        foreach (var (selector, message) in knownErrors)
+        {
+            var elements = page.Locator(selector);
+            var count = await elements.CountAsync();
+            for (var i = 0; i < count; i++)
+            {
+                var element = elements.Nth(i);
+                try
+                {
+                    if (!await element.IsVisibleAsync())
+                        continue;
+
+                    var text = (await element.InnerTextAsync()).Trim();
+                    if (text.Contains(message, StringComparison.OrdinalIgnoreCase))
+                        return message;
+                }
+                catch
+                {
+                    // ignore: element might disappear during read
+                }
+            }
+        }
+
+        return null;
     }
 
     private static async Task CaptureErrorScreenshot(IPage page, string prefix)
